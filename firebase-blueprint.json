@@ -1,0 +1,172 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated MT AI user account, plan, preferences, and daily usage metrics.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID matching document ID." },
+        "displayName": { "type": "string", "description": "User display name." },
+        "email": { "type": "string", "description": "Verified Google account email." },
+        "photoUrl": { "type": "string", "description": "Optional profile avatar URL." },
+        "role": { "type": "string", "enum": ["USER", "ADMIN"] },
+        "plan": { "type": "string", "enum": ["FREE", "PRO"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED"] },
+        "preferredLanguage": { "type": "string", "description": "Preferred AI response language." },
+        "themePreference": { "type": "string", "enum": ["SYSTEM", "DARK", "LIGHT"] },
+        "memoryEnabled": { "type": "boolean", "description": "Whether conversation memory is active." },
+        "preferredModel": { "type": "string", "description": "Selected Gemini model identifier." },
+        "dailyRequestsUsed": { "type": "integer", "description": "AI requests consumed on lastRequestDate." },
+        "lastRequestDate": { "type": "string", "description": "UTC date string YYYY-MM-DD." },
+        "totalRequests": { "type": "integer", "description": "Lifetime AI request count." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on last update." }
+      },
+      "required": [
+        "userId", "displayName", "email", "role", "plan", "status",
+        "preferredLanguage", "themePreference", "memoryEnabled", "preferredModel",
+        "dailyRequestsUsed", "lastRequestDate", "totalRequests", "createdAt", "updatedAt"
+      ]
+    },
+    "AdminGrant": {
+      "title": "AdminGrant",
+      "description": "Trusted administrator UID registry record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "grantedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "grantedBy", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "A user-owned MT AI chat conversation thread.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "modelId": { "type": "string" },
+        "lastMessagePreview": { "type": "string" },
+        "messageCount": { "type": "integer" },
+        "pinned": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "modelId", "lastMessagePreview", "messageCount", "pinned", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "An individual message inside a user's conversation.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "model"] },
+        "content": { "type": "string" },
+        "modelId": { "type": "string" },
+        "edited": { "type": "boolean" },
+        "attachmentName": { "type": "string" },
+        "attachmentType": { "type": "string" },
+        "citations": { "type": "array", "description": "Up to 10 verified source URLs." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "role", "content", "modelId", "edited", "citations", "createdAt", "updatedAt"]
+    },
+    "MemoryFact": {
+      "title": "MemoryFact",
+      "description": "User-controlled persistent AI memory item.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "fact": { "type": "string" },
+        "category": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "fact", "category", "active", "createdAt", "updatedAt"]
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Global platform configuration for models, limits, and maintenance mode.",
+      "type": "object",
+      "properties": {
+        "defaultModel": { "type": "string" },
+        "enabledModels": { "type": "array" },
+        "freeDailyLimit": { "type": "integer" },
+        "proDailyLimit": { "type": "integer" },
+        "fallbackEnabled": { "type": "boolean" },
+        "maintenanceMode": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["defaultModel", "enabledModels", "freeDailyLimit", "proDailyLimit", "fallbackEnabled", "maintenanceMode", "updatedBy", "updatedAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Admin-published global platform announcement.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "severity": { "type": "string", "enum": ["INFO", "UPDATE", "ALERT"] },
+        "active": { "type": "boolean" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "body", "severity", "active", "createdBy", "createdAt", "updatedAt"]
+    },
+    "ErrorLog": {
+      "title": "ErrorLog",
+      "description": "Runtime AI and platform error telemetry for administrators.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "source": { "type": "string" },
+        "modelId": { "type": "string" },
+        "message": { "type": "string" },
+        "resolved": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userEmail", "source", "modelId", "message", "resolved", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles, preferences, subscription tiers, and usage stats."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminGrant" },
+      "description": "Authoritative administrator UID lookup documents."
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "User-owned AI chat conversations."
+    },
+    "/users/{userId}/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages belonging to a user's conversation."
+    },
+    "/users/{userId}/memories/{memoryId}": {
+      "schema": { "$ref": "#/entities/MemoryFact" },
+      "description": "User-managed AI memory entries."
+    },
+    "/system_config/{configId}": {
+      "schema": { "$ref": "#/entities/SystemConfig" },
+      "description": "Global AI model and subscription limit settings."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Platform-wide announcements managed by admins."
+    },
+    "/error_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ErrorLog" },
+      "description": "AI and application error logs for admin monitoring."
+    }
+  }
+}

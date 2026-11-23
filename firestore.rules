@@ -1,0 +1,353 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email_verified == true && request.auth.token.email == 'mahidc67@gmail.com') ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Entity validation helpers
+    function isValidUser(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             data.email is string && data.email.size() <= 150 &&
+             (!('photoUrl' in data) || data.photoUrl == null || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+             data.role in ['USER', 'ADMIN'] &&
+             data.plan in ['FREE', 'PRO'] &&
+             data.status in ['ACTIVE', 'SUSPENDED'] &&
+             data.preferredLanguage is string && data.preferredLanguage.size() >= 1 && data.preferredLanguage.size() <= 40 &&
+             data.themePreference in ['SYSTEM', 'DARK', 'LIGHT'] &&
+             data.memoryEnabled is bool &&
+             data.preferredModel is string && data.preferredModel.size() >= 1 && data.preferredModel.size() <= 60 &&
+             data.dailyRequestsUsed is int && data.dailyRequestsUsed >= 0 && data.dailyRequestsUsed <= 100000 &&
+             data.lastRequestDate is string && data.lastRequestDate.size() >= 1 && data.lastRequestDate.size() <= 20 &&
+             data.totalRequests is int && data.totalRequests >= 0 && data.totalRequests <= 10000000;
+    }
+
+    function isValidConversation(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.modelId is string && data.modelId.size() >= 1 && data.modelId.size() <= 60 &&
+             data.lastMessagePreview is string && data.lastMessagePreview.size() <= 300 &&
+             data.messageCount is int && data.messageCount >= 0 && data.messageCount <= 50000 &&
+             data.pinned is bool;
+    }
+
+    function isValidMessage(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.role in ['user', 'model'] &&
+             data.content is string && data.content.size() <= 50000 &&
+             data.modelId is string && data.modelId.size() >= 1 && data.modelId.size() <= 60 &&
+             data.edited is bool &&
+             (!('attachmentName' in data) || data.attachmentName == null || (data.attachmentName is string && data.attachmentName.size() <= 200)) &&
+             (!('attachmentType' in data) || data.attachmentType == null || (data.attachmentType is string && data.attachmentType.size() <= 60)) &&
+             data.citations is list && data.citations.size() <= 10 &&
+             (data.citations.size() == 0 || (data.citations[0] is string && data.citations[0].size() <= 500));
+    }
+
+    function isValidMemory(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.fact is string && data.fact.size() >= 1 && data.fact.size() <= 400 &&
+             data.category is string && data.category.size() >= 1 && data.category.size() <= 40 &&
+             data.active is bool;
+    }
+
+    function isValidSystemConfig(data) {
+      return data.defaultModel is string && data.defaultModel.size() >= 1 && data.defaultModel.size() <= 60 &&
+             data.enabledModels is list && data.enabledModels.size() >= 1 && data.enabledModels.size() <= 10 &&
+             data.enabledModels[0] is string &&
+             data.freeDailyLimit is int && data.freeDailyLimit >= 1 && data.freeDailyLimit <= 1000 &&
+             data.proDailyLimit is int && data.proDailyLimit >= 1 && data.proDailyLimit <= 10000 &&
+             data.fallbackEnabled is bool &&
+             data.maintenanceMode is bool &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128;
+    }
+
+    function isValidAnnouncement(data) {
+      return data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.body is string && data.body.size() >= 1 && data.body.size() <= 1000 &&
+             data.severity in ['INFO', 'UPDATE', 'ALERT'] &&
+             data.active is bool &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128;
+    }
+
+    function isValidErrorLog(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.userEmail is string && data.userEmail.size() <= 150 &&
+             data.source is string && data.source.size() >= 1 && data.source.size() <= 60 &&
+             data.modelId is string && data.modelId.size() >= 1 && data.modelId.size() <= 60 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 1000 &&
+             data.resolved is bool;
+    }
+
+    // 1. User profiles (PII isolated to owner or admin)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidUser(incoming()) &&
+                       incoming().userId == userId &&
+                       incoming().keys().hasAll([
+                         'userId', 'displayName', 'email', 'role', 'plan', 'status',
+                         'preferredLanguage', 'themePreference', 'memoryEnabled', 'preferredModel',
+                         'dailyRequestsUsed', 'lastRequestDate', 'totalRequests', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'email', 'photoUrl', 'role', 'plan', 'status',
+                         'preferredLanguage', 'themePreference', 'memoryEnabled', 'preferredModel',
+                         'dailyRequestsUsed', 'lastRequestDate', 'totalRequests', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       (
+                         isAdmin() ||
+                         (
+                           request.auth.uid == userId &&
+                           incoming().role == 'USER' &&
+                           incoming().plan == 'FREE' &&
+                           incoming().status == 'ACTIVE' &&
+                           incoming().dailyRequestsUsed == 0 &&
+                           incoming().totalRequests == 0
+                         )
+                       );
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidUser(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       (
+                         (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+                           'role', 'plan', 'status', 'dailyRequestsUsed', 'lastRequestDate',
+                           'displayName', 'preferredLanguage', 'themePreference', 'memoryEnabled',
+                           'preferredModel', 'updatedAt'
+                         ])) ||
+                         (isOwner(userId) && existing().status == 'ACTIVE' && incoming().diff(existing()).affectedKeys().hasOnly([
+                           'displayName', 'photoUrl', 'preferredLanguage', 'themePreference',
+                           'memoryEnabled', 'preferredModel', 'updatedAt'
+                         ])) ||
+                         (isOwner(userId) && existing().status == 'ACTIVE' &&
+                          incoming().totalRequests >= existing().totalRequests &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                           'dailyRequestsUsed', 'lastRequestDate', 'totalRequests', 'updatedAt'
+                         ]))
+                       );
+
+      allow delete: if isAdmin() && isValidId(userId);
+
+      // 1a. User-owned conversations
+      match /conversations/{conversationId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(conversationId);
+        allow list: if isOwner(userId) && isValidId(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(conversationId) &&
+                         isValidConversation(incoming()) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'modelId', 'lastMessagePreview',
+                           'messageCount', 'pinned', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'modelId', 'lastMessagePreview',
+                           'messageCount', 'pinned', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                         incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
+
+        allow update: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(conversationId) &&
+                         isValidConversation(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'title', 'modelId', 'lastMessagePreview', 'messageCount', 'pinned', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(conversationId);
+
+        // 1b. Messages inside user-owned conversation
+        match /messages/{messageId} {
+          allow get: if isOwner(userId) && isValidId(userId) && isValidId(conversationId) && isValidId(messageId);
+          allow list: if isOwner(userId) && isValidId(userId) && isValidId(conversationId);
+
+          allow create: if isOwner(userId) &&
+                           isValidId(userId) &&
+                           isValidId(conversationId) &&
+                           isValidId(messageId) &&
+                           isValidMessage(incoming()) &&
+                           incoming().userId == userId &&
+                           incoming().keys().hasAll([
+                             'userId', 'role', 'content', 'modelId', 'edited',
+                             'citations', 'createdAt', 'updatedAt'
+                           ]) &&
+                           incoming().keys().hasOnly([
+                             'userId', 'role', 'content', 'modelId', 'edited',
+                             'attachmentName', 'attachmentType', 'citations', 'createdAt', 'updatedAt'
+                           ]) &&
+                           incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                           incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
+
+          allow update: if isOwner(userId) &&
+                           isValidId(userId) &&
+                           isValidId(conversationId) &&
+                           isValidId(messageId) &&
+                           isValidMessage(incoming()) &&
+                           incoming().userId == existing().userId &&
+                           incoming().createdAt == existing().createdAt &&
+                           incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'content', 'edited', 'modelId', 'citations', 'attachmentName', 'attachmentType', 'updatedAt'
+                           ]);
+
+          allow delete: if isOwner(userId) && isValidId(userId) && isValidId(conversationId) && isValidId(messageId);
+        }
+      }
+
+      // 1c. User-controlled AI memories
+      match /memories/{memoryId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(memoryId);
+        allow list: if isOwner(userId) && isValidId(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(memoryId) &&
+                         isValidMemory(incoming()) &&
+                         incoming().userId == userId &&
+                         incoming().keys().hasAll(['userId', 'fact', 'category', 'active', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'fact', 'category', 'active', 'createdAt', 'updatedAt']) &&
+                         incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                         incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
+
+        allow update: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(memoryId) &&
+                         isValidMemory(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['fact', 'category', 'active', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(memoryId);
+      }
+    }
+
+    // 2. Trusted Admin Grants
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && isValidId(adminUid) && (request.auth.uid == adminUid || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() &&
+                               isValidId(adminUid) &&
+                               incoming().keys().hasAll(['uid', 'email', 'grantedBy', 'createdAt']) &&
+                               incoming().keys().hasOnly(['uid', 'email', 'grantedBy', 'createdAt']) &&
+                               incoming().uid == adminUid &&
+                               incoming().email is string && incoming().email.size() <= 150 &&
+                               incoming().grantedBy is string && incoming().grantedBy.size() <= 128 &&
+                               incoming().createdAt is timestamp && incoming().createdAt <= request.time;
+      allow delete: if isAdmin() && isValidId(adminUid);
+    }
+
+    // 3. System Config
+    match /system_config/{configId} {
+      allow get: if isSignedIn() && isValidId(configId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() &&
+                       isValidId(configId) &&
+                       isValidSystemConfig(incoming()) &&
+                       incoming().keys().hasAll([
+                         'defaultModel', 'enabledModels', 'freeDailyLimit', 'proDailyLimit',
+                         'fallbackEnabled', 'maintenanceMode', 'updatedBy', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'defaultModel', 'enabledModels', 'freeDailyLimit', 'proDailyLimit',
+                         'fallbackEnabled', 'maintenanceMode', 'updatedBy', 'updatedAt'
+                       ]) &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
+      allow update: if isAdmin() &&
+                       isValidId(configId) &&
+                       isValidSystemConfig(incoming()) &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'defaultModel', 'enabledModels', 'freeDailyLimit', 'proDailyLimit',
+                         'fallbackEnabled', 'maintenanceMode', 'updatedBy', 'updatedAt'
+                       ]);
+      allow delete: if isAdmin() && isValidId(configId);
+    }
+
+    // 4. Announcements
+    match /announcements/{announcementId} {
+      allow get: if isSignedIn() && isValidId(announcementId) && (existing().active == true || isAdmin());
+      allow list: if isSignedIn() && (isAdmin() || resource.data.active == true);
+      allow create: if isAdmin() &&
+                       isValidId(announcementId) &&
+                       isValidAnnouncement(incoming()) &&
+                       incoming().keys().hasAll(['title', 'body', 'severity', 'active', 'createdBy', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['title', 'body', 'severity', 'active', 'createdBy', 'createdAt', 'updatedAt']) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
+      allow update: if isAdmin() &&
+                       isValidId(announcementId) &&
+                       isValidAnnouncement(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'body', 'severity', 'active', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(announcementId);
+    }
+
+    // 5. Error Logs
+    match /error_logs/{logId} {
+      allow get: if isAdmin() && isValidId(logId);
+      allow list: if isAdmin();
+      allow create: if isSignedIn() &&
+                       isValidId(logId) &&
+                       isValidErrorLog(incoming()) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().resolved == false &&
+                       incoming().keys().hasAll(['userId', 'userEmail', 'source', 'modelId', 'message', 'resolved', 'createdAt']) &&
+                       incoming().keys().hasOnly(['userId', 'userEmail', 'source', 'modelId', 'message', 'resolved', 'createdAt']) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time;
+      allow update: if isAdmin() &&
+                       isValidId(logId) &&
+                       isValidErrorLog(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['resolved']);
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+  }
+}
